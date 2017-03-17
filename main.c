@@ -9,20 +9,29 @@ int main(int argc, char  **argv)
 	DiskICs d;
 
 	int i;
-	//int nz = 128;	   //grid size in z positive direction
+	int nz = 128;	   //grid size in z positive direction
 	int nzout = 128;	   //grid size in z positive direction
-	int nz = 2560;
+	//int nz = 2560;
 	//int nz = 12800;	   //grid size in z positive direction
-
+	//int nz=128;
 	double z_min = 0;  //bottom of z cell column in kpc
 	double z_max = 10; //top of z cell column in kpc
 	double dz;         // cell width
+	double dzout;         // cell width
+
 	double *z;			  // array of cell centers
+	double *zout;			  // array of cell centers
+
 	double *rho;		  // array of cell averaged densities
 	double *rhog;		  // array of hydrostatic weight
 	double *p; 		    // array of pressure
 	double *gradp;		// array of pressure gradients
 	double *gza;		  // array of accelerations
+	double *drhoa;		  // array of accelerations
+	double *rhoout;		  // array of cell averaged densities
+	double *pout;		  // array of cell averaged densities
+	double *gzaout;		  // array of cell averaged densities
+	double *gradpout;		  // array of cell averaged densities
 
 	double a,b;			//integration limits
 	double SigmaCells;	//surface density in cells
@@ -43,6 +52,7 @@ int main(int argc, char  **argv)
 
 	//compute cell width
 	dz = (z_max - z_min)/((double) nz);
+	dzout = (z_max - z_min)/((double) nzout);
 
 
 	printf("1/2 Number of cells in (positive) z-direction = %d\n",nz);
@@ -67,6 +77,12 @@ int main(int argc, char  **argv)
 	p     = (double *) calloc(nz,sizeof(double));
 	gradp = (double *) calloc(nz,sizeof(double));
 	gza   = (double *) calloc(nz,sizeof(double));
+	drhoa   = (double *) calloc(nz,sizeof(double));
+	zout     = (double *) calloc(nzout,sizeof(double));
+	rhoout     = (double *) calloc(nzout,sizeof(double));
+	pout     = (double *) calloc(nzout,sizeof(double));
+	gradpout     = (double *) calloc(nzout,sizeof(double));
+	gzaout     = (double *) calloc(nzout,sizeof(double));
 
 	//set z and (un-normalized) rho arrays
 	//compute profile integration
@@ -127,7 +143,7 @@ int main(int argc, char  **argv)
 	printf("Corrected SigmaCells %e 0.5*Sigma(%e) %e\n",SigmaCells,R,0.5*SigmaDisk(R,d));
 
 	int iter = 0;
-	int niter_max = 100000;
+	int niter_max = 10000000;
 	//output density profile with z-height
 	sprintf(fname,"density_data/density.%06d.txt",iter);
 	fp = fopen(fname,"w");
@@ -142,7 +158,7 @@ int main(int argc, char  **argv)
 	double Lnorm;
 	double g;
 	double drho;
-	double fac = 1.0e-2;
+	double fac = 1.0e-6;
 	while(flag)
 	{
 		//reset error
@@ -183,6 +199,7 @@ int main(int argc, char  **argv)
 			{
 				drho = (drho/fabs(drho))*fac*rho[i+1];
 			}
+			drhoa[i] = drho;
 			//printf("z %e rhogdz/cs^2 %e Drho %e rho[i] %e rho[i+1] %e drho %e\n",z[i],a,b,rho[i],rho[i+1],drho);
 
 
@@ -210,13 +227,19 @@ int main(int argc, char  **argv)
 			*/
 
 			//correct rho
-			rho[i+1] -= drho;
+			//rho[i+1] -= drho;
 
 			//add to surface density
-			SigmaCells += rho[i]*dz;
+			//SigmaCells += rho[i]*dz;
 
 			//printf("z %e new rho %e\n",z[i],rho[i]);
 
+
+		}
+		for(i=1;i<nz;i++)
+		{
+			rho[i] -= drhoa[i-1];
+			SigmaCells += rho[i]*dz;
 
 		}
 
@@ -230,16 +253,18 @@ int main(int argc, char  **argv)
 
 		//correct gradp
 		SigmaCells = 0;
-		for(i=0;i<nz;i++)
+		for(i=0;i<nz-1;i++)
 		{
-			if(i==0)
+			/*if(i==0)
 			{
 				gradp[i] = pow(d.cs,2)*(rho[i+1]-rho[i])/(z[i+1]-z[i]);
 			}else if(i==nz-1){
 				gradp[i] = pow(d.cs,2)*(rho[i]-rho[i-1])/(z[i]-z[i-1]);
 			}else{
 				gradp[i] = pow(d.cs,2)*(rho[i+1]-rho[i-1])/(z[i+1]-z[i-1]);
-			}
+			}*/
+			gradp[i] = pow(d.cs,2)*(rho[i+1]-rho[i])/(z[i+1]-z[i]);
+
 			SigmaCells += rho[i]*dz;
 
 			if(z[i]<5.0)
@@ -267,6 +292,40 @@ int main(int argc, char  **argv)
 			for(i=0;i<nz;i++)
 				fprintf(fp,"%e\t%e\t%e\t%e\t%e\n",z[i],rho[i],rho[i]*gza[i],p[i],gradp[i]);
 			fclose(fp);
+
+			int iz;
+			sprintf(fname,"test.out.txt");
+			fp = fopen(fname,"w");
+
+
+			for(iz=0;iz<nzout;iz++)
+				zout[iz] = 0.5*dzout + ( (double) iz)*dzout;
+
+			iz=0;
+			for(i=0;i<nz;i++)
+			{
+				if(z[i]>zout[iz])
+				{
+					rhoout[iz] /= dzout;
+					pout[iz]    = pow(d.cs,2)*rhoout[iz];
+					gzaout[iz] = gz(R, zout[iz], d);
+					if(iz<nzout-1)
+						gradpout[iz] = pow(d.cs,2)*(rhoout[iz+1]-rhoout[iz])/(zout[iz+1]-zout[iz]);
+
+					iz++;
+					if(iz>=nzout)
+						break;
+				}
+				rhoout[iz] += rho[i]*dz;
+			}
+
+			for(i=0;i<nzout-1;i++)
+			{
+				fprintf(fp,"%e\t%e\t%e\t%e\t%e\n",zout[i],rhoout[i],rhoout[i]*gzaout[i],pout[i],gradpout[i]);
+
+			}
+			fclose(fp);
+
 		}
 
 		//printf("-------------- Lnorm = %e\n",Lnorm);
